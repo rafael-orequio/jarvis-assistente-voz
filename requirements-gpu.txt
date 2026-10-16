@@ -1,0 +1,3 @@
+# Opcional: so para usar a placa de video (RTX) no Whisper. Download grande (~1 GB).
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*

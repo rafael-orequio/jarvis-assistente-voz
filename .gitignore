@@ -1,0 +1,13 @@
+# Segredos e dados pessoais (nunca versionar)
+.env
+vault/
+
+# Ambiente e lixo do Python
+.venv/
+__pycache__/
+*.pyc
+
+# Editor / sistema
+.vscode/
+.idea/
+*.log

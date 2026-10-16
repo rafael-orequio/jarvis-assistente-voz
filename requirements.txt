@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+httpx
+feedparser
+python-dotenv
+google-genai
+faster-whisper
+psutil
+sounddevice
+pynput
