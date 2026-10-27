@@ -104,6 +104,27 @@ def resumo() -> dict:
             "plano": [re.sub(r"^\d+\.\s*", "", l) for l in linhas if re.match(r"^\d+\.\s", l)]}
 
 
+def prazos_do_dia(hoje=None) -> dict:
+    """Títulos das tarefas pendentes atrasadas, de hoje e de amanhã (para o aviso diário de prazos)."""
+    hoje = hoje or dt.date.today()
+    amanha = hoje + dt.timedelta(days=1)
+    with _trava:
+        pendentes = [t for t in _ler() if not t["feita"] and t["prazo"]]
+    d = {"atrasadas": [], "hoje": [], "amanha": []}
+    for t in sorted(pendentes, key=lambda t: t["prazo"]):
+        try:
+            p = dt.date.fromisoformat(t["prazo"])
+        except ValueError:  # prazo escrito errado à mão no arquivo
+            continue
+        if p < hoje:
+            d["atrasadas"].append(t["titulo"])
+        elif p == hoje:
+            d["hoje"].append(t["titulo"])
+        elif p == amanha:
+            d["amanha"].append(t["titulo"])
+    return d
+
+
 def criar_ferramentas(coletados: list) -> list:
     """Devolve as ferramentas de tarefas/plano que o Gemini pode chamar."""
 

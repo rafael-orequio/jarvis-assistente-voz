@@ -34,6 +34,8 @@
   #cards { position:fixed; left:0; right:0; bottom:11vh; display:flex; gap:16px; padding:0 24px; justify-content:center; flex-wrap:wrap }
   .card { background:var(--painel); border:1px solid rgba(127,228,255,.35); border-radius:6px; padding:14px 18px; max-width:320px;
     box-shadow:0 0 22px rgba(47,140,255,.25); backdrop-filter:blur(6px); animation:entra .5s ease-out }
+  .card.alerta { border-color:var(--alerta); box-shadow:0 0 22px rgba(255,180,84,.3) }
+  #audioAviso { color:var(--alerta); font-size:.85rem }
   .card small { color:var(--ciano); display:block; margin-bottom:6px }
   .card b { font-size:2rem; font-weight:600 }
   .card div + div { margin-top:4px }
@@ -54,6 +56,7 @@
 <aside id="dir" class="painel">
   <span id="hora"></span><span id="data"></span>
   <h2>tarefas</h2><div id="tarefas"></div>
+  <h2>lembretes</h2><div id="lembretes"></div>
   <h2>jarvis</h2><div id="info"></div>
 </aside>
 <div id="cards"></div>
@@ -62,10 +65,12 @@
   <button id="bMic">Ativar microfone</button>
   <button id="bEco">Economia: auto</button>
   <span id="dica">depois, segure ESPAÇO para falar</span>
+  <span id="audioAviso">clique na página uma vez para liberar o áudio dos alertas</span>
 </div>
 <script>
 const $ = id => document.getElementById(id);
 let estado = "espera";
+let listaLembretes = [], vazioMostrado = false;
 // Modo econômico: menos quadros por segundo e menos consultas. "auto" liga sozinho quando o notebook está na bateria.
 let modoEco = "auto", noBateria = false;
 try { modoEco = localStorage.getItem("jarvis-eco") || "auto"; } catch (e) {}
@@ -145,7 +150,7 @@ function relogio(){
   $("hora").textContent = d.toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" });
   $("data").textContent = d.toLocaleDateString("pt-BR", { weekday:"long", day:"numeric", month:"long" });
 }
-relogio(); setInterval(relogio, 1000);
+relogio(); setInterval(() => { relogio(); desenhaLembretes(); }, 1000);
 
 const VITAIS = [["cpu","CPU"], ["ram","RAM"], ["gpu","GPU"], ["vram","VRAM"], ["temp","TEMP. GPU"], ["bat","BATERIA"]];
 const HIST = ["cpu", "ram", "gpu"], hist = {}, MAXH = 40;      // gráfico dos últimos ~2 minutos
@@ -182,6 +187,7 @@ function mostraVitais(d){
   t.proximas.forEach(p => resumo.push([`• ${p.titulo}${p.prazo ? " — " + p.prazo : ""}`, p.situacao === "atrasada" ? "atrasada" : ""]));
   if (t.plano.length){ resumo.push(["Plano de hoje:"]); t.plano.forEach((p, n) => resumo.push([`${n + 1}. ${p}`])); }
   linhas($("tarefas"), resumo);
+  listaLembretes = d.lembretes || []; desenhaLembretes();
   noBateria = !!(d.bateria && !d.bateria.carregando);
   linhas($("info"), [["Voz: " + d.jarvis.voz], ["Cérebro: " + d.jarvis.cerebro], ["Modo: " + (economico() ? "econômico" : "normal")], ["Tecla global: " + (d.jarvis.tecla || "desligada")]]);
   if (d.jarvis.tecla) $("dica").textContent = `segure ${d.jarvis.tecla} (em qualquer janela) ou ESPAÇO nesta aba, e fale`;
@@ -198,6 +204,43 @@ $("bEco").onclick = () => {
   rotuloEco();
 };
 rotuloEco();
+
+// ---------- Lembretes e alertas ----------
+function desenhaLembretes(){
+  if (!listaLembretes.length){
+    if (!vazioMostrado){ linhas($("lembretes"), [["Nenhum lembrete."]]); vazioMostrado = true; }
+    return;
+  }
+  vazioMostrado = false;
+  const agora = Date.now();
+  linhas($("lembretes"), listaLembretes.map(l => {
+    const falta = l.quando_ms - agora, d = new Date(l.quando_ms);
+    let quando;
+    if (falta <= 0) quando = "agora";
+    else if (l.tipo === "timer" || falta < 3600000){        // contagem regressiva mm:ss
+      const s = Math.ceil(falta/1000);
+      quando = String(Math.floor(s/60)).padStart(2, "0") + ":" + String(s%60).padStart(2, "0");
+    } else {
+      const hora = d.toLocaleTimeString("pt-BR", { hour:"2-digit", minute:"2-digit" });
+      quando = d.toDateString() === new Date().toDateString() ? hora : d.toLocaleDateString("pt-BR", { day:"2-digit", month:"2-digit" }) + " " + hora;
+    }
+    return [`• ${l.texto} — ${quando}`, falta <= 0 ? "atrasada" : ""];
+  }));
+}
+function bipes(){                                            // três bips curtos, sem arquivo de som
+  try {
+    const ac = new AudioContext();
+    [0, .25, .5].forEach(t => {
+      const o = ac.createOscillator(), g = ac.createGain();
+      o.frequency.value = 880; g.gain.value = .12; o.connect(g); g.connect(ac.destination);
+      o.start(ac.currentTime + t); o.stop(ac.currentTime + t + .15);
+    });
+    setTimeout(() => ac.close(), 1500);
+  } catch (e) {}
+}
+// O Chrome só deixa a página falar sozinha depois de um clique ou tecla nela; até lá, mostramos um aviso.
+if (navigator.userActivation && navigator.userActivation.hasBeenActive) $("audioAviso").hidden = true;
+["pointerdown", "keydown"].forEach(ev => addEventListener(ev, () => { $("audioAviso").hidden = true; }, { once:true }));
 
 // ---------- Localização, comunicação e cards ----------
 function posicao(){
@@ -216,6 +259,7 @@ sock.onmessage = ev => {
   if (m.type === "card") mostraCard(m);
   if (m.type === "fala") fala(m.texto);
   if (m.type === "parar_fala") speechSynthesis.cancel();
+  if (m.type === "alerta"){ bipes(); mostraCard({ tipo:"alerta", dados:{ texto:m.texto, tipoAlerta:m.tipo } }); fala(m.texto); }
 };
 function mostraCard(m){
   const d = m.dados, el = document.createElement("div"); el.className = "card";
@@ -233,6 +277,10 @@ function mostraCard(m){
     rotulo.textContent = "plano do dia";
     d.prioridades.forEach((p, n) => add("div", `${n + 1}. ${p}`));
     if (d.observacoes) add("div", d.observacoes).style.opacity = ".7";
+  } else if (m.tipo === "alerta"){
+    rotulo.textContent = d.tipoAlerta === "timer" ? "timer" : d.tipoAlerta === "prazos" ? "prazos" : "lembrete";
+    el.classList.add("alerta");
+    add("div", d.texto);
   } else if (m.tipo === "acao"){
     rotulo.textContent = "ação";
     add("div", d.texto);
